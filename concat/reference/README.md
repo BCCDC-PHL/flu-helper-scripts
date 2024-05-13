@@ -73,7 +73,7 @@ The final step is to generate the custom FASTA and GFF3 file.
 Using 1) your multiFASTA file and 2) the directory of GFF3 files you generated, run the second script:
 
 ```
-python build_concat.py -f <MULTIFASTA> -g <OUTPUT_GFF_PATH> -o <GFF_FILENAME> -O <FASTA_FILENAME>
+python build_concat.py -f <MULTIFASTA> -g <OUTPUT_GFF_PATH> -o <CONCAT_GFF_FILENAME> -O <CONCAT_FASTA_FILENAME>
 
 # example
 python build_concat.py -f flu_a_h1n1_reference.fasta -g flu_gff_files -o flu_concat.gff3 -O flu_concat.fasta
