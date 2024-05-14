@@ -5,9 +5,15 @@ import argparse
 from glob import glob 
 from collections import Counter
 
+# modify this regular expression if needed to correctly extract your header from the FASTA filename
+# this regex is used to split the filename, and the first element gets used as the header
+# default: splits by _ and .
+HEADER_FROM_FILENAME_REGEX = re.compile(r"_|\.")
+
+# used to detect FASTA files in your input directory; change if needed
 FASTA_REGEX = re.compile(r"\.fas?t?a?$", re.IGNORECASE)
 
-# modify this if 
+# modify these regular expressions to match your segments if needed
 SEGMENTS = "PB2 PB1 PA HA NP NA M NS".split()
 SEGMENTS_REGEX = [re.compile(r"[-_\|]" + s) for s in SEGMENTS]
 
@@ -19,7 +25,7 @@ def init_parser():
 
 	parser.add_argument("-i", "--input",  required=True, help="Either single FASTA file, or folder of files, containing 8 segments per file.")
 	parser.add_argument('-o', "--output", required=True, help="If using file input, output FASTA file name. If using folder input, output folder name.")
-	parser.add_argument('-n','--header', default=None, help='Concatenated sequence header name. Only relevant in single file concat mode. Otherwise, default is the first element when splitting filename by both "_" and "."')
+	parser.add_argument('-n','--header', default=None, help='Concatenated sequence header name. Only relevant in single file concat mode. Otherwise, default is the first element when splitting filename by both "_" and ".". This default be changed at the top of the script.')
 
 	return parser
 
@@ -152,7 +158,7 @@ def extract_segment(filepath, target_segment):
 	# Check if exactly one sequence is found
 	if len(search_segments) != 1: 
 		# If no sequence is found, print an error message
-		print("ERROR: Could not locate a singular sequence that matches the segment of interest. You may need to specify a more advanced / specific regex using the --segment argument.")
+		print(f"ERROR: Could not locate a singular sequence that matches the search '{target_segment}'. You may need to specify a more advanced / specific regex using the --segment argument.")
 		print("Search results: ", search_segments)
 		return None 
 
@@ -161,7 +167,7 @@ def extract_segment(filepath, target_segment):
 
 def process_fasta(infile, outfile, segment, concat, header):
 	# Set the output file name
-	header = header if header else re.split(r"_|\.", os.path.basename(infile))[0]
+	header = header if header else HEADER_FROM_FILENAME_REGEX.split(os.path.basename(infile))[0]
 
 	# Concatenate the sequences if the --concat flag is provided
 	# Otherwise, extract the sequence that matches the target segment
@@ -206,7 +212,7 @@ def main(args):
 			# Set the output file path
 			outfile = os.path.join(args.output, os.path.basename(f))
 			# Call the process_fasta function with the input file, output file, segment, concat, and header arguments
-			process_fasta(f, outfile, args.segment, args.concat, args.header)
+			process_fasta(f, outfile, args.segment, args.concat, None)
 	# If the input file/folder does not exist, print an error message
 	else:
 		print("ERROR: Input FASTA file/folder does not exist", file=sys.stderr)
