@@ -3,22 +3,23 @@ import os, sys
 import re
 import argparse
 from glob import glob 
+from collections import Counter
 
-FASTA_REGEX = re.compile(r"\.fas?t?a?", re.IGNORECASE)
+FASTA_REGEX = re.compile(r"\.fas?t?a?$", re.IGNORECASE)
 
 # modify this if 
 SEGMENTS = "PB2 PB1 PA HA NP NA M NS".split()
 SEGMENTS_REGEX = [re.compile(r"[-_\|]" + s) for s in SEGMENTS]
 
 def init_parser():
-	parser = argparse.ArgumentParser(description="Extract and manipulate influenza segments from a file")
+	parser = argparse.ArgumentParser(description="Concatenate (or extract specific segment from) influenza FASTA files.")
 	group = parser.add_mutually_exclusive_group(required=True)
 	group.add_argument("-s", "--segment", default='NONE', type=str, help="Named argument to extract a specific segment from all FASTA files. This works as a regular expression search.")
 	group.add_argument("-c", "--concat", action='store_true', help="Flag to concatenate all segments together")
 
-	parser.add_argument("-i", "--input",  required=True, help="Input FASTA file containing 8 segments per file.")
-	parser.add_argument('-o', "--output", required=True, help="Output FASTA file name")
-	parser.add_argument('-n','--header', default=None, help='Concatenated sequence header name. Only used in concat mode. Default is the first element of the filename when splitting by both "_" and "."')
+	parser.add_argument("-i", "--input",  required=True, help="Either single FASTA file, or folder of files, containing 8 segments per file.")
+	parser.add_argument('-o', "--output", required=True, help="If using file input, output FASTA file name. If using folder input, output folder name.")
+	parser.add_argument('-n','--header', default=None, help='Concatenated sequence header name. Only relevant in single file concat mode. Otherwise, default is the first element when splitting filename by both "_" and "."')
 
 	return parser
 
@@ -93,28 +94,34 @@ def concatenate_sequences(filepath, header):
 
 	# Check if the FASTA file contains 8 sequences
 	if len(sequences) != 8:
-		print(f"WARN: Skipping {filepath}. Segment sequences are missing")
+		print(f"ERROR: Skipping {filepath}. There are {len(sequences)} sequences present instead of 8.")
 		return None
 
 	# Sort the sequences according to the SEGMENTS order
 	sequences_sorted = []
-	fail = False
 	for segment, expr in zip(SEGMENTS, SEGMENTS_REGEX):
 		# Search for sequences that match the current segment
 		result = [seq for seq in sequences if expr.search(seq[0])]
 
-		# If no sequence is found, print a warning
-		if len(result) != 1:
-			print(f"Could not isolate sequence for segment {segment}.")
-			print(result)
-			fail = True
+		# Catch specific case where there are off target regex matches
+		counts = [len(expr.search(seq[0]).groups())  for seq in sequences if expr.search(seq[0])]
+		counter = Counter(counts)
+		most_common = counter.most_common(1)[0]
 
-		# Add the sequence to the sorted list
-		sequences_sorted.append(result[0])
-	
-	if fail:
-		print(f"ERROR: Segment sequences are missing in {filepath}. See above errors. Exiting.")
-		return None
+		# Find best match amidst off target regex matches
+		if len(result) == 8 and len(counter) > 1 and most_common[1] == 1:
+			N_best_match = [n for n, x in enumerate(counts) if x == most_common[0]][0]
+			sequences_sorted.append(result[N_best_match])
+		
+		# Normal case, no off-target matches, one result returned
+		elif len(result) == 1:
+			sequences_sorted.append(result[0])
+		
+		# Incorrect number of results, return None
+		else:
+			print(f"ERROR: Could not isolate sequence for segment {segment}. {len(result)} results found. Exiting.")
+			return None
+
 	
 	# Concatenate the sequences
 	concatenated_seq = ''
@@ -152,6 +159,22 @@ def extract_segment(filepath, target_segment):
 	# Return the single sequence that matches the target segment
 	return search_segments[0]
 
+def process_fasta(infile, outfile, segment, concat, header):
+	# Set the output file name
+	header = header if header else re.split(r"_|\.", os.path.basename(infile))[0]
+
+	# Concatenate the sequences if the --concat flag is provided
+	# Otherwise, extract the sequence that matches the target segment
+	if concat:
+		seq = concatenate_sequences(infile, header)
+	else:
+		seq = extract_segment(infile, segment)
+	
+	if seq:
+		# Write the sequence to the output file
+		write_fasta([seq], outfile)
+
+
 def main(args):
 	"""
 	Main function to handle the execution of the script.
@@ -160,23 +183,34 @@ def main(args):
 		args (argparse.Namespace): The parsed command line arguments.
 	"""
 
-	# Check if the input file exists
-	if not os.path.isfile(args.input):
-		print("ERROR: Input FASTA file does not exist", file=sys.stderr)
-		sys.exit(1)
+	# If the input is a file, process it
+	if os.path.isfile(args.input):
+		print("Processing: " + os.path.basename(args.input))
+		# Call the process_fasta function with the input file, output file, segment, concat, and header arguments
+		process_fasta(args.input, args.output, args.segment, args.concat, args.header)
+	
+	# If the input is a directory, process all FASTA files in the directory
+	elif os.path.isdir(args.input):
+		
+		# Create the output directory if it does not exist
+		os.makedirs(args.output, exist_ok=True)
 
-	# Set the output file name
-	header = args.header if args.header else re.split(r"_|\.", os.path.basename(args.input))[0]
+		# List all files in the input directory that match the FASTA regex
+		file_list = glob(os.path.join(args.input, '*'))
+		file_list = [x for x in file_list if FASTA_REGEX.search(x)]
 
-	# Concatenate the sequences if the --concat flag is provided
-	# Otherwise, extract the sequence that matches the target segment
-	if args.concat:
-		seq = concatenate_sequences(args.input, header)
+		# Iterate over each file
+		for f in file_list:
+			# Print the name of the file being processed
+			print("Processing: " + os.path.basename(f))
+			# Set the output file path
+			outfile = os.path.join(args.output, os.path.basename(f))
+			# Call the process_fasta function with the input file, output file, segment, concat, and header arguments
+			process_fasta(f, outfile, args.segment, args.concat, args.header)
+	# If the input file/folder does not exist, print an error message
 	else:
-		seq = extract_segment(args.input, args.segment)
+		print("ERROR: Input FASTA file/folder does not exist", file=sys.stderr)
 
-	# Write the sequence to the output file
-	write_fasta([seq], args.output)
 
 if __name__ == "__main__":
 	args = init_parser().parse_args()
